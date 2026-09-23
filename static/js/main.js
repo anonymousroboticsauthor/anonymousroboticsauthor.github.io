@@ -72,7 +72,14 @@
      view pairs are kept in sync and restart together.
      ----------------------------------------------------------------------- */
   const MAX_DRIFT = 0.15;   // seconds a pair may drift apart while playing before it is re-aligned
-  const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Groups whose autoplay the browser refused; any tap/click/key press restarts them.
+  const blockedGroups = new Set();
+  const resumeBlocked = () => {
+    blockedGroups.forEach((g) => g.unblock());
+    blockedGroups.clear();
+  };
+  ['pointerdown', 'touchend', 'keydown'].forEach((type) =>
+    document.addEventListener(type, resumeBlocked, { capture: true, passive: true }));
 
   // True when the clip has at least a second (or the rest of the clip) buffered ahead.
   const hasDataAhead = (v) => {
@@ -119,14 +126,14 @@
           });
         });
       }
-
-      if (reducedMotion) this.block();
     }
 
-    // No autoplay (reduced-motion preference, or the browser refused it, e.g. iOS
-    // Low Power Mode): hand the clips over to their native controls.
+    // The browser refused autoplay (e.g. iOS Low Power Mode or a site setting): show
+    // native controls so a clip can be started by hand; the next tap anywhere on the
+    // page (a user gesture) restarts everything via unblock().
     block() {
       this.blocked = true;
+      blockedGroups.add(this);
       this.stopTicking();
       this.videos.forEach((v) => {
         if (v.classList.contains('hero-video')) {   // background video: just hold still
@@ -141,6 +148,19 @@
         v.loop = true;
         v.tabIndex = 0;
       });
+    }
+
+    unblock() {
+      this.blocked = false;
+      this.state = 'holding';
+      this.videos.forEach((v) => {
+        if (v.classList.contains('hero-video')) v.autoplay = true;
+        v.controls = false;
+        v.loop = !this.synced;
+        v.tabIndex = -1;
+        if (this.shouldPlay) this.play(v);   // inside the gesture, so the browser allows it
+      });
+      this.update();
     }
 
     load() {
